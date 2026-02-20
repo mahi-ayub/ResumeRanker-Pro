@@ -1,0 +1,63 @@
+John Smith
+john.smith@email.com | (555) 987-6543
+linkedin.com/in/johnsmith | github.com/johnsmith
+
+Summary
+Senior Backend Engineer with 6+ years of experience building scalable distributed systems 
+and high-performance APIs. Passionate about clean architecture, database optimization, 
+and mentoring junior developers.
+
+Skills
+Python, Java, Go, JavaScript, TypeScript
+Django, Flask, FastAPI, Spring Boot, Express.js
+PostgreSQL, MongoDB, Redis, Elasticsearch, DynamoDB
+Docker, Kubernetes, Terraform, AWS, GitHub Actions
+REST API, GraphQL, gRPC, Microservices, Event-Driven Architecture
+Linux, Nginx, RabbitMQ, Kafka, Celery
+
+Experience
+
+Senior Backend Engineer — TechCorp Inc.
+Jan 2022 - Present
+- Architected and deployed a microservices platform handling 15M+ API requests/day with 99.97% uptime
+- Reduced API p95 latency by 45% through query optimization and Redis caching, saving $120K/year in infrastructure
+- Led migration from monolithic Django app to FastAPI + Kubernetes, improving deployment frequency by 300%
+- Mentored 4 junior engineers through structured code reviews and pair programming sessions
+- Designed event-driven architecture using Kafka for real-time data processing of 5M events/day
+
+Backend Engineer — StartupXYZ
+Jun 2019 - Dec 2021
+- Built RESTful APIs using Flask and Django serving 2M+ monthly active users
+- Implemented full-text search with Elasticsearch, improving search relevance by 60%
+- Designed PostgreSQL schema for multi-tenant SaaS platform handling 500+ organizations
+- Set up CI/CD pipeline with GitHub Actions reducing deployment time from 2 hours to 15 minutes
+- Integrated third-party payment APIs (Stripe, PayPal) processing $3M+ in monthly transactions
+
+Junior Software Engineer — DevAgency
+Aug 2017 - May 2019
+- Developed REST APIs using Python/Flask for client projects across e-commerce and fintech
+- Built automated testing suite achieving 85% code coverage across 3 projects
+- Implemented database migrations and optimization for PostgreSQL databases
+- Collaborated in Agile sprints with cross-functional teams of 8-12 members
+
+Projects
+
+Real-time Analytics Dashboard
+Built a real-time analytics platform using FastAPI + WebSocket + Redis PubSub for streaming dashboard updates.
+Tech: FastAPI, Redis, PostgreSQL, React, Docker
+Handled 10K concurrent connections with sub-100ms update latency.
+
+Open-source CLI Tool — dbsync
+Created a database synchronization CLI tool in Go with 500+ GitHub stars.
+Tech: Go, PostgreSQL, MySQL, SQLite
+Features automated schema diffing, migration generation, and rollback support.
+
+Education
+
+Bachelor of Science in Computer Science — State University
+2017
+GPA: 3.7/4.0
+
+Certifications
+AWS Certified Solutions Architect - Associate
+Certified Kubernetes Administrator (CKA)

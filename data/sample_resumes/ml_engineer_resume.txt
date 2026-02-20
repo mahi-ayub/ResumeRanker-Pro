@@ -1,0 +1,63 @@
+Jane Lee
+jane.lee@email.com | (555) 555-1234
+linkedin.com/in/janelee | github.com/janelee-ml
+
+Summary
+ML Engineer with 4 years of experience building end-to-end machine learning systems.
+Focused on NLP, recommendation systems, and production ML infrastructure.
+
+Skills
+Python, SQL, Bash
+PyTorch, TensorFlow, Keras, Scikit-learn, XGBoost, Hugging Face Transformers
+Pandas, NumPy, SciPy, Matplotlib, Seaborn
+Docker, Kubernetes, MLflow, Weights & Biases, Airflow
+AWS SageMaker, GCP Vertex AI, S3, EC2
+REST API, Flask, FastAPI
+
+Experience
+
+ML Engineer — DataAI Corp
+Mar 2023 - Present
+- Developed and deployed a real-time NLP classification model serving 2M+ predictions/day with 94% accuracy
+- Built an end-to-end recommendation system increasing user engagement by 28% using collaborative filtering + deep learning
+- Implemented A/B testing framework for model experiments, running 15+ concurrent experiments
+- Optimized model inference latency from 200ms to 45ms through ONNX conversion and quantization
+- Managed ML pipeline orchestration using Airflow processing 50GB+ daily training data
+
+Data Scientist — AnalyticsPro
+Jun 2021 - Feb 2023
+- Built customer churn prediction model (XGBoost) achieving 0.91 AUC, saving $2M/year in retention
+- Developed NLP sentiment analysis pipeline processing 100K+ customer reviews/month
+- Created interactive dashboards using Plotly and Streamlit for stakeholder reporting
+- Conducted statistical analysis and hypothesis testing for product feature experiments
+
+ML Research Intern — University AI Lab
+Jan 2021 - May 2021
+- Implemented transformer-based text summarization model achieving ROUGE-L score of 0.42
+- Published research paper on few-shot learning for domain adaptation
+
+Projects
+
+Resume Skill Matcher
+Built a semantic skill matching system using sentence-transformers and cosine similarity.
+Tech: Python, sentence-transformers, FastAPI, Streamlit
+Matches resume skills to job requirements with 89% accuracy on benchmark dataset.
+
+Time Series Anomaly Detector
+Developed an anomaly detection system for IoT sensor data using LSTM autoencoders.
+Tech: PyTorch, Pandas, Grafana, Docker
+Detected anomalies with 96% precision and 91% recall on production data.
+
+Education
+
+Master of Science in Computer Science (Machine Learning) — Tech University
+2021
+GPA: 3.9/4.0
+
+Bachelor of Science in Mathematics — State University
+2019
+
+Certifications
+TensorFlow Developer Certificate
+AWS Certified Machine Learning - Specialty
+Google Professional Machine Learning Engineer

@@ -1,0 +1,44 @@
+Senior Backend Engineer
+
+About the Company:
+We are a fast-growing fintech startup building the next generation of payment infrastructure.
+Our platform processes millions of transactions daily and serves clients across 20+ countries.
+
+About the Role:
+We are looking for a Senior Backend Engineer to join our Platform team and help build
+scalable, high-performance distributed systems that power our core payment processing engine.
+
+Requirements:
+- 5+ years of professional software engineering experience
+- Strong proficiency in Python and/or Go
+- Experience with Django, Flask, or FastAPI
+- Deep knowledge of PostgreSQL and Redis
+- Experience with Docker, Kubernetes, and CI/CD pipelines
+- Familiarity with microservices architecture and event-driven design
+- Strong understanding of REST API design and implementation
+- Experience with distributed systems and high-availability architectures
+- Solid understanding of security best practices (OAuth, JWT, encryption)
+
+Nice to Have:
+- Experience with Apache Kafka or RabbitMQ for message queuing
+- Knowledge of Terraform and infrastructure as code
+- AWS or GCP cloud certifications
+- Experience with GraphQL
+- Contributions to open-source projects
+- Experience with gRPC and protocol buffers
+
+Responsibilities:
+- Design and implement backend services handling millions of requests per day
+- Optimize database performance, query efficiency, and data modeling
+- Build and maintain CI/CD pipelines for automated testing and deployment
+- Mentor junior engineers, conduct code reviews, and drive engineering best practices
+- Collaborate with frontend, DevOps, and product teams to deliver features
+- Participate in on-call rotation and incident response
+- Contribute to system architecture decisions and technical roadmap
+
+Benefits:
+- Competitive salary and equity
+- Remote-first culture
+- Health insurance and 401(k)
+- Annual learning budget
+- Conference attendance sponsorship

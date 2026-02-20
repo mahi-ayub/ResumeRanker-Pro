@@ -1,0 +1,36 @@
+Senior Machine Learning Engineer
+
+About the Company:
+We are an AI-first company building intelligent automation solutions for enterprise customers.
+Our ML platform powers real-time predictions across healthcare, finance, and logistics.
+
+About the Role:
+We're hiring a Senior ML Engineer to design, train, and deploy production ML models
+that serve millions of predictions daily with sub-100ms latency.
+
+Requirements:
+- 4+ years of experience in machine learning engineering
+- Strong proficiency in Python and PyTorch or TensorFlow
+- Experience with NLP (transformers, BERT, GPT, sentence-transformers)
+- Solid understanding of ML fundamentals: regression, classification, clustering, deep learning
+- Experience with model serving (TorchServe, TensorFlow Serving, Triton)
+- Familiarity with MLOps: experiment tracking (MLflow, W&B), model versioning
+- Experience with data pipelines (Spark, Airflow, or similar)
+- Strong software engineering skills: testing, CI/CD, code review
+- Experience with cloud platforms (AWS SageMaker, GCP Vertex AI, or Azure ML)
+
+Nice to Have:
+- PhD or Master's in Computer Science, ML, or related field
+- Experience with LLMs and prompt engineering
+- Knowledge of computer vision (OpenCV, YOLO, segmentation)
+- Experience with A/B testing and experimentation frameworks
+- Published research papers or patents
+- Experience with Kubernetes for ML workloads
+
+Responsibilities:
+- Design and implement ML models from research to production
+- Build scalable training and inference pipelines
+- Collaborate with data scientists on model architecture and feature engineering
+- Optimize model performance, latency, and resource utilization
+- Set up monitoring and alerting for model drift and degradation
+- Mentor team members and contribute to ML best practices
