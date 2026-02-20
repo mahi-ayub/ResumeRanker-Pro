@@ -122,13 +122,36 @@ class JDAnalyzer:
         for category, skills in SKILL_CATEGORIES.items():
             all_known_skills.update(skills)
 
-        for skill in all_known_skills:
+        # Filter out overly short/ambiguous skill names for substring matching
+        # Skills like "r", "c", "go" need word-boundary matching
+        short_skills = {s for s in all_known_skills if len(s) <= 2}
+        long_skills = all_known_skills - short_skills
+
+        for skill in long_skills:
             if skill in required_text.lower():
                 required.append(skill)
             elif skill in preferred_text.lower():
                 preferred.append(skill)
             elif skill in jd_lower:
                 required.append(skill)  # Default to required
+
+        # For short skills (r, go, c#, etc.), use word-boundary regex to avoid false positives
+        import re as _re
+        for skill in short_skills:
+            # Special handling: "r" alone is very ambiguous — only match "R programming" or "R language" or standalone "R," patterns
+            if skill == "r":
+                r_pattern = r'\bR\b(?:\s+(?:programming|language|studio)|\s*[,;|/])'
+                if _re.search(r_pattern, jd_text):
+                    required.append(skill)
+                continue
+
+            pattern = r'\b' + _re.escape(skill) + r'\b'
+            if _re.search(pattern, required_text, _re.IGNORECASE):
+                required.append(skill)
+            elif _re.search(pattern, preferred_text, _re.IGNORECASE):
+                preferred.append(skill)
+            elif _re.search(pattern, jd_text, _re.IGNORECASE):
+                required.append(skill)
 
         # Also extract technology names via patterns
         tech_pattern = re.compile(

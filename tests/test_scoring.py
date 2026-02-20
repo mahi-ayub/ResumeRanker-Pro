@@ -23,14 +23,14 @@ class TestDynamicWeights:
         assert "experience" in weights
         assert "project_relevance" in weights
         assert "education" in weights
-        # Main weights should sum close to 0.90
+        # Main weights should sum close to 1.0
         main_sum = (
             weights["skill_match"]
             + weights["experience"]
             + weights["project_relevance"]
             + weights["education"]
         )
-        assert abs(main_sum - 0.90) < 0.01
+        assert abs(main_sum - 1.0) < 0.01
 
     def test_ml_engineer_weights(self):
         jd_analysis = {"role_type": "ml_engineer"}

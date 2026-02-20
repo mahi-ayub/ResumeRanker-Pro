@@ -239,8 +239,15 @@ class ExperienceAnalyzer:
                 reasons.append(f"Experience ({actual}y) below requirement ({jd_required_years}y)")
             score += years_score * 0.5
         else:
-            score += 0.35  # Neutral if no requirement specified
-            reasons.append("No specific years requirement in JD")
+            # No years requirement — give credit based on having experience
+            actual = resume_analysis.get("total_years", 0)
+            if actual >= 5:
+                score += 0.45
+            elif actual >= 2:
+                score += 0.35
+            else:
+                score += 0.25
+            reasons.append(f"No specific years requirement in JD (candidate has {actual}y)")
 
         # Seniority match
         if jd_seniority:

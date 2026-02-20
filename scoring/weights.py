@@ -41,9 +41,9 @@ class DynamicWeightCalculator:
             "education": self.base.education_weight * role_profile.get("education_weight", 1.0),
         }
 
-        # Normalize main weights to sum to ~0.90 (leaving room for bonuses/penalties)
+        # Normalize main weights to sum to 1.0 (full range utilization)
         total = sum(raw_weights.values())
-        target_sum = 0.90
+        target_sum = 1.0
         weights = {k: round(v / total * target_sum, 4) for k, v in raw_weights.items()}
 
         # Add bonus/penalty weights (not normalized)

@@ -42,9 +42,32 @@ class PDFParser:
             if len(text_fitz.strip()) > len(text.strip()):
                 text = text_fitz
 
+        # If both methods give short text, try combining them
+        if len(text.strip()) < 100:
+            text_fitz = self._extract_with_pymupdf(file_path, file_bytes)
+            if len(text_fitz.strip()) > len(text.strip()):
+                text = text_fitz
+
         if len(text.strip()) < 20:
             logger.warning("Extracted very little text from PDF. The file may be image-based.")
 
+        # Clean up common PDF extraction artifacts
+        text = self._clean_pdf_text(text)
+
+        return text
+
+    def _clean_pdf_text(self, text: str) -> str:
+        """Clean up common PDF extraction artifacts."""
+        import re
+        # Fix multiple blank lines
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        # Fix broken lines within sentences (line break in middle of sentence)
+        # But preserve intentional line breaks (after periods, bullets, etc.)
+        text = re.sub(r'(?<=[a-z,])\n(?=[a-z])', ' ', text)
+        # Normalize unicode dashes to regular dashes
+        text = text.replace('\u2013', '-').replace('\u2014', '-').replace('\u2212', '-')
+        # Remove null bytes
+        text = text.replace('\x00', '')
         return text
 
     def _extract_with_pdfplumber(

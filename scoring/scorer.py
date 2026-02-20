@@ -116,6 +116,20 @@ class ResumeScorer:
         # Augment with entity extraction
         additional_skills = self.entity_extractor.extract_skills_from_text(resume_text)
         all_skills = list(set(resume_data.skills + additional_skills))
+
+        # Also extract skills from experience descriptions and project descriptions
+        exp_text = " ".join(
+            " ".join(e.get("bullets", [])) + " " + e.get("description", "")
+            for e in resume_data.experience
+        )
+        proj_text = " ".join(
+            p.get("description", "") + " " + " ".join(p.get("technologies", []))
+            for p in resume_data.projects
+        )
+        from_exp = self.entity_extractor.extract_skills_from_text(exp_text)
+        from_proj = self.entity_extractor.extract_skills_from_text(proj_text)
+        all_skills = list(set(all_skills + from_exp + from_proj))
+
         resume_data.skills = all_skills
 
         additional_certs = self.entity_extractor.extract_certifications_from_text(resume_text)
@@ -161,6 +175,7 @@ class ResumeScorer:
         proj_result = self.semantic_matcher.compute_project_relevance(
             projects=resume_data.projects,
             jd_text=jd_text,
+            jd_skills=jd_analysis["all_skills"],
         )
         result.project_relevance_score = round(proj_result["overall_score"] * 100, 1)
         result.project_scores = proj_result["project_scores"]
@@ -169,13 +184,14 @@ class ResumeScorer:
         edu_score = self.semantic_matcher.compute_education_relevance(
             education=resume_data.education,
             jd_text=jd_text,
+            jd_skills=jd_analysis["all_skills"],
         )
         result.education_score = round(edu_score * 100, 1)
 
         # 8. Certification bonus
         cert_bonus = min(
             len(resume_data.certifications) * weights["certification_bonus"] * 100,
-            15.0  # Cap at 15 points
+            10.0  # Cap at 10 points
         )
         result.certification_bonus = round(cert_bonus, 1)
 
@@ -188,14 +204,14 @@ class ResumeScorer:
         result.missing_skill_penalty = round(missing_penalty, 1)
 
         # 10. Weighted aggregation
-        overall = (
+        # Weights now sum to 1.0, so the base score naturally ranges 0-100
+        base_score = (
             result.skill_match_score * weights["skill_match"]
             + result.experience_score * weights["experience"]
             + result.project_relevance_score * weights["project_relevance"]
             + result.education_score * weights["education"]
-            + result.certification_bonus
-            - result.missing_skill_penalty
         )
+        overall = base_score + result.certification_bonus - result.missing_skill_penalty
         result.overall_score = round(clamp(overall, 0, 100), 1)
 
         # 11. Generate explanations

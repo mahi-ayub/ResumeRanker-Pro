@@ -126,14 +126,36 @@ class SectionExtractor:
 
     def _split_into_sections(self, text: str) -> Dict[str, str]:
         """Split text into named sections based on header patterns."""
+        # Normalize common PDF extraction artifacts
+        # PDF parsers often produce inconsistent whitespace and line breaks
+        text = re.sub(r'\r\n', '\n', text)
+        text = re.sub(r'\r', '\n', text)
+
         # Find all section headers with their positions
         headers = []
         for section_name, pattern in SECTION_PATTERNS.items():
             for match in pattern.finditer(text):
                 headers.append((match.start(), match.end(), section_name))
 
+        # Also try to detect headers by common patterns that PDF extraction may produce:
+        # e.g., "SKILLS" or "EXPERIENCE" on its own line (all caps), or "Skills:" etc.
+        if len(headers) < 2:
+            # Fallback: try line-by-line header detection for PDF-extracted text
+            fallback_headers = self._detect_headers_fallback(text)
+            if len(fallback_headers) > len(headers):
+                headers = fallback_headers
+
         # Sort by position
         headers.sort(key=lambda x: x[0])
+
+        # Deduplicate: if same section detected multiple times, keep first
+        seen_sections = set()
+        unique_headers = []
+        for start, end, name in headers:
+            if name not in seen_sections:
+                seen_sections.add(name)
+                unique_headers.append((start, end, name))
+        headers = unique_headers
 
         sections = {}
         for i, (start, end, name) in enumerate(headers):
@@ -148,6 +170,39 @@ class SectionExtractor:
             sections["experience"] = text
 
         return sections
+
+    def _detect_headers_fallback(self, text: str) -> list:
+        """Fallback header detection for PDF-extracted text where headers may be garbled."""
+        headers = []
+        lines = text.split('\n')
+
+        header_map = {
+            "skills": ["skill", "technical skill", "core competenc", "technologies", "tech stack", "tools"],
+            "experience": ["experience", "work experience", "professional experience", "employment", "work history"],
+            "projects": ["project", "personal project", "key project", "portfolio"],
+            "education": ["education", "academic", "qualification", "degree"],
+            "certifications": ["certification", "license", "credential"],
+            "summary": ["summary", "objective", "about me", "profile", "overview"],
+            "awards": ["award", "honor", "achievement"],
+            "publications": ["publication", "paper", "research"],
+            "languages": ["language", "spoken language"],
+        }
+
+        pos = 0
+        for line in lines:
+            stripped = line.strip().rstrip(':').strip()
+            stripped_lower = stripped.lower()
+            # Headers are typically short (< 40 chars) and may be all caps or title case
+            if stripped and len(stripped) < 40:
+                for section_name, keywords in header_map.items():
+                    if any(kw in stripped_lower for kw in keywords):
+                        line_start = text.find(line, pos)
+                        if line_start >= 0:
+                            headers.append((line_start, line_start + len(line), section_name))
+                        break
+            pos += len(line) + 1  # +1 for newline
+
+        return headers
 
     def _extract_contact_info(self, text: str) -> Dict[str, str]:
         """Extract email, phone, LinkedIn, GitHub from text."""
