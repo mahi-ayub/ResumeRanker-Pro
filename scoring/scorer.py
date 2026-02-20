@@ -1,14 +1,20 @@
-"""Resume Scorer — the main scoring pipeline.
+"""Resume Scorer — ATS-realistic scoring pipeline.
 
 Orchestrates:
-1. Resume parsing
-2. JD analysis
-3. Semantic matching
-4. Experience analysis
-5. Dynamic weight computation
-6. Final score aggregation
+1. Resume parsing & PDF text cleanup
+2. JD analysis (required vs preferred skills)
+3. Semantic matching (document-level + skill-level)
+4. Required-skill match ratio (highest weight)
+5. Tool/technology exact matching with controlled boost
+6. Experience alignment against JD responsibilities
+7. ATS-weighted aggregation (skills dominate, not cosine)
+8. Structured JSON output with calibrated scoring
 
-Produces an explainable ScoreResult.
+Calibration targets:
+  Strong match  = 80–90
+  Moderate      = 65–79
+  Partial       = 50–64
+  Weak          < 50
 """
 
 from typing import Dict, List, Optional
@@ -23,7 +29,25 @@ from nlp.semantic_matcher import SemanticMatcher
 from nlp.experience_analyzer import ExperienceAnalyzer
 from nlp.jd_analyzer import JDAnalyzer
 from scoring.weights import DynamicWeightCalculator
-from utils.helpers import clamp
+from utils.helpers import clamp, clean_text, deduplicate_list
+
+
+# ── Critical keywords eligible for exact-match boost ────────────────
+CRITICAL_KEYWORDS = {
+    # Cloud & DevOps
+    "aws", "azure", "gcp", "terraform", "docker", "kubernetes",
+    "jenkins", "ansible", "ci/cd", "linux", "prometheus", "grafana",
+    # Languages & Frameworks
+    "python", "java", "javascript", "typescript", "go", "rust", "c++",
+    "react", "angular", "vue", "django", "flask", "fastapi", "spring",
+    "node.js", "next.js",
+    # Data & ML
+    "pytorch", "tensorflow", "scikit-learn", "spark", "kafka", "airflow",
+    "sql", "postgresql", "mysql", "mongodb", "redis", "elasticsearch",
+    # Domain-specific
+    "incident management", "sla", "on-call", "monitoring",
+    "microservices", "rest api", "graphql", "agile", "scrum",
+}
 
 
 @dataclass
@@ -35,13 +59,22 @@ class ScoreResult:
     project_relevance_score: float = 0.0
     education_score: float = 0.0
 
+    # ATS-specific component scores (0-1 normalized)
+    semantic_similarity: float = 0.0
+    required_skill_match: float = 0.0
+    tool_match: float = 0.0
+    experience_relevance: float = 0.0
+
     # Bonuses and penalties
     certification_bonus: float = 0.0
     missing_skill_penalty: float = 0.0
+    keyword_boost: float = 0.0
 
     # Details
     matched_skills: List[Dict] = field(default_factory=list)
     missing_skills: List[Dict] = field(default_factory=list)
+    matched_required_skills: List[str] = field(default_factory=list)
+    missing_required_skills: List[str] = field(default_factory=list)
     extra_skills: List[str] = field(default_factory=list)
     project_scores: List[Dict] = field(default_factory=list)
 
@@ -59,6 +92,14 @@ class ScoreResult:
     def to_dict(self) -> dict:
         return {
             "overall_score": self.overall_score,
+            "final_score": self.overall_score,
+            "semantic_similarity": self.semantic_similarity,
+            "required_skill_match": self.required_skill_match,
+            "tool_match": self.tool_match,
+            "experience_relevance": self.experience_relevance,
+            "matched_required_skills": self.matched_required_skills,
+            "missing_required_skills": self.missing_required_skills,
+            "boost_applied": self.keyword_boost,
             "skill_match_score": self.skill_match_score,
             "experience_score": self.experience_score,
             "project_relevance_score": self.project_relevance_score,
@@ -78,7 +119,15 @@ class ScoreResult:
 
 
 class ResumeScorer:
-    """Main scoring pipeline: parse, analyze, match, score, explain."""
+    """ATS-realistic scoring pipeline: parse → analyze → match → score → explain."""
+
+    # ── ATS weight distribution (skills dominate) ───────────────────
+    W_SEMANTIC   = 0.35   # Full-document cosine similarity
+    W_REQUIRED   = 0.45   # Required-skill match ratio (highest)
+    W_TOOL       = 0.10   # Exact tool/technology keyword match
+    W_EXPERIENCE = 0.10   # Experience alignment
+    MAX_KEYWORD_BOOST = 8.0   # Max exact-keyword bonus
+    SCORE_CAP = 95.0          # Hard ceiling (avoid unrealistic 100)
 
     def __init__(self):
         self.pdf_parser = PDFParser()
@@ -90,34 +139,28 @@ class ResumeScorer:
         self.jd_analyzer = JDAnalyzer()
         self.weight_calculator = DynamicWeightCalculator()
 
+    # ────────────────────────────────────────────────────────────────
+    #  Main entry point
+    # ────────────────────────────────────────────────────────────────
     def score_resume(
         self,
         resume_text: str,
         jd_text: str,
         resume_data: Optional[ResumeData] = None,
     ) -> ScoreResult:
-        """
-        Score a resume against a job description.
-
-        Args:
-            resume_text: Raw resume text (already extracted from PDF).
-            jd_text: Job description text.
-            resume_data: Pre-parsed ResumeData (if available, skips parsing).
-
-        Returns:
-            ScoreResult with full breakdown.
-        """
         result = ScoreResult()
 
-        # 1. Parse resume if not already provided
+        # ── 0. Clean resume text (PDF robustness) ──────────────────
+        resume_text = clean_text(resume_text)
+
+        # ── 1. Parse resume ────────────────────────────────────────
         if resume_data is None:
             resume_data = self.section_extractor.extract(resume_text)
 
-        # Augment with entity extraction
+        # Augment with entity extraction from all sections
         additional_skills = self.entity_extractor.extract_skills_from_text(resume_text)
         all_skills = list(set(resume_data.skills + additional_skills))
 
-        # Also extract skills from experience descriptions and project descriptions
         exp_text = " ".join(
             " ".join(e.get("bullets", [])) + " " + e.get("description", "")
             for e in resume_data.experience
@@ -128,34 +171,64 @@ class ResumeScorer:
         )
         from_exp = self.entity_extractor.extract_skills_from_text(exp_text)
         from_proj = self.entity_extractor.extract_skills_from_text(proj_text)
-        all_skills = list(set(all_skills + from_exp + from_proj))
-
+        all_skills = deduplicate_list(list(set(all_skills + from_exp + from_proj)))
         resume_data.skills = all_skills
 
         additional_certs = self.entity_extractor.extract_certifications_from_text(resume_text)
         resume_data.certifications = list(set(resume_data.certifications + additional_certs))
-
         result.resume_data = resume_data.to_dict()
 
-        # 2. Analyze JD
+        # ── 2. Analyze JD ──────────────────────────────────────────
         jd_analysis = self.jd_analyzer.analyze(jd_text)
         result.jd_analysis = jd_analysis
 
-        # 3. Compute dynamic weights
-        weights = self.weight_calculator.compute_weights(jd_analysis)
-        result.weights_used = weights
+        required_skills = jd_analysis.get("required_skills", [])
+        preferred_skills = jd_analysis.get("preferred_skills", [])
+        all_jd_skills = jd_analysis.get("all_skills", [])
 
-        # 4. Semantic skill matching
+        # ── 3. Dynamic weights (for legacy display) ────────────────
+        weights = self.weight_calculator.compute_weights(jd_analysis)
+        result.weights_used = {
+            **weights,
+            "ats_semantic": self.W_SEMANTIC,
+            "ats_required_skill": self.W_REQUIRED,
+            "ats_tool": self.W_TOOL,
+            "ats_experience": self.W_EXPERIENCE,
+        }
+
+        # ── 4. Semantic skill matching (full list) ─────────────────
         skill_result = self.semantic_matcher.compute_skill_similarity(
             resume_skills=resume_data.skills,
-            jd_skills=jd_analysis["all_skills"],
+            jd_skills=all_jd_skills,
         )
         result.skill_match_score = round(skill_result["overall_score"] * 100, 1)
         result.matched_skills = skill_result["matched_skills"]
         result.missing_skills = skill_result["missing_skills"]
         result.extra_skills = skill_result["extra_skills"]
 
-        # 5. Experience analysis
+        # ── 5. Required-skill match ratio ──────────────────────────
+        req_match_ratio, matched_req, missing_req = self._compute_required_skill_match(
+            resume_skills=resume_data.skills,
+            required_skills=required_skills,
+            skill_result=skill_result,
+        )
+        result.required_skill_match = round(req_match_ratio, 3)
+        result.matched_required_skills = matched_req
+        result.missing_required_skills = missing_req
+
+        # ── 6. Document-level semantic similarity ──────────────────
+        sem_sim = self.semantic_matcher.compute_section_similarity(resume_text, jd_text)
+        result.semantic_similarity = round(sem_sim, 3)
+
+        # ── 7. Tool / technology exact match ───────────────────────
+        tool_score = self._compute_tool_match(
+            resume_skills=resume_data.skills,
+            resume_text=resume_text,
+            jd_skills=all_jd_skills,
+        )
+        result.tool_match = round(tool_score, 3)
+
+        # ── 8. Experience analysis & alignment ─────────────────────
         exp_analysis = self.experience_analyzer.analyze(
             experience=resume_data.experience,
             projects=resume_data.projects,
@@ -169,71 +242,225 @@ class ResumeScorer:
             jd_required_years=jd_analysis.get("years_required"),
             jd_seniority=jd_analysis.get("seniority"),
         )
-        result.experience_score = round(exp_match["score"] * 100, 1)
+        # Also factor in responsibility alignment via semantic similarity
+        resp_text = jd_analysis.get("raw_text", "")
+        resp_sim = self.semantic_matcher.compute_section_similarity(exp_text, resp_text)
+        # Blend: 60% structured match + 40% semantic responsibility alignment
+        blended_exp = exp_match["score"] * 0.6 + min(1.0, resp_sim * 1.5) * 0.4
+        result.experience_relevance = round(blended_exp, 3)
+        result.experience_score = round(blended_exp * 100, 1)
 
-        # 6. Project relevance
+        # ── 9. Project relevance (for display) ─────────────────────
         proj_result = self.semantic_matcher.compute_project_relevance(
             projects=resume_data.projects,
             jd_text=jd_text,
-            jd_skills=jd_analysis["all_skills"],
+            jd_skills=all_jd_skills,
         )
         result.project_relevance_score = round(proj_result["overall_score"] * 100, 1)
         result.project_scores = proj_result["project_scores"]
 
-        # 7. Education relevance
+        # ── 10. Education relevance (for display) ──────────────────
         edu_score = self.semantic_matcher.compute_education_relevance(
             education=resume_data.education,
             jd_text=jd_text,
-            jd_skills=jd_analysis["all_skills"],
+            jd_skills=all_jd_skills,
         )
         result.education_score = round(edu_score * 100, 1)
 
-        # 8. Certification bonus
+        # ── 11. Certification bonus ────────────────────────────────
         cert_bonus = min(
             len(resume_data.certifications) * weights["certification_bonus"] * 100,
-            10.0  # Cap at 10 points
+            8.0,
         )
         result.certification_bonus = round(cert_bonus, 1)
 
-        # 9. Missing skill penalty
-        n_missing = len(result.missing_skills)
+        # ── 12. Exact keyword boost (controlled, max +8) ──────────
+        keyword_boost = self._compute_keyword_boost(
+            resume_text=resume_text,
+            resume_skills=resume_data.skills,
+            jd_skills=all_jd_skills,
+        )
+        result.keyword_boost = round(keyword_boost, 1)
+
+        # ── 13. Missing-skill penalty (only for required) ─────────
+        n_missing_req = len(missing_req)
+        n_total_req = max(len(required_skills), 1)
         missing_penalty = min(
-            n_missing * weights["missing_skill_penalty"] * 100,
-            weights["max_missing_penalty"] * 100,
+            (n_missing_req / n_total_req) * 15.0,  # Proportional, max 15 pts
+            15.0,
         )
         result.missing_skill_penalty = round(missing_penalty, 1)
 
-        # 10. Weighted aggregation
-        # Weights now sum to 1.0, so the base score naturally ranges 0-100
+        # ── 14. ATS-weighted aggregation ───────────────────────────
+        #
+        #   final = 0.35 * semantic_sim
+        #         + 0.45 * required_skill_match
+        #         + 0.10 * tool_match
+        #         + 0.10 * experience_relevance
+        #         + keyword_boost + cert_bonus - missing_penalty
+        #
+        # All component scores are 0-1, multiplied by 100
         base_score = (
-            result.skill_match_score * weights["skill_match"]
-            + result.experience_score * weights["experience"]
-            + result.project_relevance_score * weights["project_relevance"]
-            + result.education_score * weights["education"]
-        )
-        overall = base_score + result.certification_bonus - result.missing_skill_penalty
-        result.overall_score = round(clamp(overall, 0, 100), 1)
+            self.W_SEMANTIC   * result.semantic_similarity
+            + self.W_REQUIRED * result.required_skill_match
+            + self.W_TOOL     * result.tool_match
+            + self.W_EXPERIENCE * result.experience_relevance
+        ) * 100.0
 
-        # 11. Generate explanations
+        # Required-skill coverage boost: if ≥70% required skills present, boost
+        if req_match_ratio >= 0.70:
+            coverage_boost = (req_match_ratio - 0.70) / 0.30 * 5.0  # up to +5
+            base_score += coverage_boost
+
+        overall = base_score + keyword_boost + cert_bonus - missing_penalty
+        result.overall_score = round(clamp(overall, 0, self.SCORE_CAP), 1)
+
+        # ── 15. Generate explanations ──────────────────────────────
         self._generate_explanations(result, weights, jd_analysis)
 
-        logger.info(f"Final Score: {result.overall_score}/100")
+        logger.info(
+            f"Final Score: {result.overall_score}/100 "
+            f"[sem={result.semantic_similarity:.2f} req={result.required_skill_match:.2f} "
+            f"tool={result.tool_match:.2f} exp={result.experience_relevance:.2f} "
+            f"boost={result.keyword_boost:.1f}]"
+        )
 
         return result
 
+    # ────────────────────────────────────────────────────────────────
+    #  Required-skill match ratio
+    # ────────────────────────────────────────────────────────────────
+    def _compute_required_skill_match(
+        self,
+        resume_skills: List[str],
+        required_skills: List[str],
+        skill_result: Dict,
+    ) -> tuple:
+        """
+        Compute fraction of required JD skills present in resume.
+        Uses exact case-insensitive match first, then semantic fallback.
+        Returns (ratio, matched_list, missing_list).
+        """
+        if not required_skills:
+            # No explicit required section — use all matched skills
+            n_matched = len(skill_result.get("matched_skills", []))
+            n_total = n_matched + len(skill_result.get("missing_skills", []))
+            ratio = n_matched / max(n_total, 1)
+            matched = [m.get("jd_skill", "") for m in skill_result.get("matched_skills", [])]
+            missing = [m.get("skill", "") for m in skill_result.get("missing_skills", [])]
+            return ratio, matched, missing
+
+        resume_lower = {s.lower().strip() for s in resume_skills}
+        matched = []
+        missing = []
+
+        for req in required_skills:
+            req_clean = req.lower().strip()
+            # Exact match
+            if req_clean in resume_lower:
+                matched.append(req)
+                continue
+            # Check if any resume skill contains this required skill (substring)
+            if any(req_clean in rs for rs in resume_lower):
+                matched.append(req)
+                continue
+            # Semantic fallback from the already-computed skill_result
+            found_semantic = False
+            for m in skill_result.get("matched_skills", []):
+                if m.get("jd_skill", "").lower().strip() == req_clean and m.get("similarity", 0) >= 0.45:
+                    matched.append(req)
+                    found_semantic = True
+                    break
+            if not found_semantic:
+                missing.append(req)
+
+        ratio = len(matched) / max(len(required_skills), 1)
+        return ratio, matched, missing
+
+    # ────────────────────────────────────────────────────────────────
+    #  Tool / technology exact match
+    # ────────────────────────────────────────────────────────────────
+    def _compute_tool_match(
+        self,
+        resume_skills: List[str],
+        resume_text: str,
+        jd_skills: List[str],
+    ) -> float:
+        """
+        Compute what fraction of JD tools/technologies appear exactly
+        in the resume (case-insensitive). Normalized 0-1.
+        """
+        if not jd_skills:
+            return 0.0
+
+        resume_lower = resume_text.lower()
+        resume_skill_set = {s.lower().strip() for s in resume_skills}
+        matched = 0
+
+        for skill in jd_skills:
+            s = skill.lower().strip()
+            if s in resume_skill_set or s in resume_lower:
+                matched += 1
+
+        return matched / len(jd_skills)
+
+    # ────────────────────────────────────────────────────────────────
+    #  Exact keyword boost (controlled, max +8)
+    # ────────────────────────────────────────────────────────────────
+    def _compute_keyword_boost(
+        self,
+        resume_text: str,
+        resume_skills: List[str],
+        jd_skills: List[str],
+    ) -> float:
+        """
+        Award a controlled bonus when critical JD keywords appear
+        exactly in the resume. Only counts keywords that are BOTH
+        in the JD and in the critical-keyword set.
+        Max +8 points.
+        """
+        resume_lower = resume_text.lower()
+        resume_skill_lower = {s.lower().strip() for s in resume_skills}
+        jd_skill_lower = {s.lower().strip() for s in jd_skills}
+
+        # Only consider keywords that the JD actually asks for
+        eligible = CRITICAL_KEYWORDS & jd_skill_lower
+        if not eligible:
+            return 0.0
+
+        hits = 0
+        for kw in eligible:
+            if kw in resume_skill_lower or kw in resume_lower:
+                hits += 1
+
+        # Scale: each hit is worth 1.5 pts, capped at MAX_KEYWORD_BOOST
+        boost = min(hits * 1.5, self.MAX_KEYWORD_BOOST)
+        return boost
+
+    # ────────────────────────────────────────────────────────────────
+    #  Explanations
+    # ────────────────────────────────────────────────────────────────
     def _generate_explanations(self, result: ScoreResult, weights: Dict, jd_analysis: Dict):
         """Generate human-readable strengths, weaknesses, and reasoning."""
         # Strengths
+        if result.required_skill_match >= 0.70:
+            result.strengths.append(
+                f"Strong required-skill coverage ({result.required_skill_match:.0%})"
+            )
         if result.skill_match_score >= 70:
-            result.strengths.append(f"Strong skill alignment ({result.skill_match_score:.0f}%)")
-        if result.experience_score >= 70:
-            result.strengths.append(f"Good experience match ({result.experience_score:.0f}%)")
+            result.strengths.append(f"Good overall skill alignment ({result.skill_match_score:.0f}%)")
+        if result.experience_relevance >= 0.65:
+            result.strengths.append(f"Relevant experience ({result.experience_score:.0f}%)")
         if result.project_relevance_score >= 60:
             result.strengths.append(f"Relevant project portfolio ({result.project_relevance_score:.0f}%)")
         if result.certification_bonus > 0:
             result.strengths.append(f"Relevant certifications (+{result.certification_bonus:.0f} pts)")
-        if len(result.matched_skills) > 5:
-            result.strengths.append(f"{len(result.matched_skills)} skills matched to JD")
+        if result.keyword_boost > 0:
+            result.strengths.append(f"Critical keyword matches (+{result.keyword_boost:.0f} pts)")
+        if len(result.matched_required_skills) > 3:
+            result.strengths.append(
+                f"{len(result.matched_required_skills)} required skills matched"
+            )
 
         exp_quality = result.experience_analysis.get("experience_quality", {})
         if exp_quality.get("quantified_ratio", 0) > 0.3:
@@ -242,35 +469,41 @@ class ResumeScorer:
             result.strengths.append("Leadership experience detected")
 
         # Weaknesses
+        if result.required_skill_match < 0.50:
+            result.weaknesses.append(
+                f"Low required-skill coverage ({result.required_skill_match:.0%})"
+            )
         if result.skill_match_score < 50:
-            result.weaknesses.append(f"Low skill alignment ({result.skill_match_score:.0f}%)")
+            result.weaknesses.append(f"Low overall skill alignment ({result.skill_match_score:.0f}%)")
         if result.experience_score < 50:
             result.weaknesses.append(f"Experience gap ({result.experience_score:.0f}%)")
-        if len(result.missing_skills) > 3:
-            missing_names = [m.get("skill", "") for m in result.missing_skills[:5]]
-            result.weaknesses.append(f"Missing critical skills: {', '.join(missing_names)}")
+        if result.missing_required_skills:
+            names = result.missing_required_skills[:5]
+            result.weaknesses.append(f"Missing required skills: {', '.join(names)}")
         if result.project_relevance_score < 40:
             result.weaknesses.append("Project portfolio not well aligned to JD")
         if exp_quality.get("quantified_ratio", 0) < 0.15:
             result.weaknesses.append("Few quantified achievements in experience bullets")
 
-        # Score reasoning
+        # Score reasoning (ATS breakdown)
         result.score_reasoning.append(
-            f"Skill Match ({result.skill_match_score:.0f} × {weights['skill_match']:.0%}) = "
-            f"{result.skill_match_score * weights['skill_match']:.1f}"
+            f"Semantic Similarity ({result.semantic_similarity:.2f} × {self.W_SEMANTIC:.0%}) = "
+            f"{result.semantic_similarity * self.W_SEMANTIC * 100:.1f}"
         )
         result.score_reasoning.append(
-            f"Experience ({result.experience_score:.0f} × {weights['experience']:.0%}) = "
-            f"{result.experience_score * weights['experience']:.1f}"
+            f"Required Skill Match ({result.required_skill_match:.2f} × {self.W_REQUIRED:.0%}) = "
+            f"{result.required_skill_match * self.W_REQUIRED * 100:.1f}"
         )
         result.score_reasoning.append(
-            f"Projects ({result.project_relevance_score:.0f} × {weights['project_relevance']:.0%}) = "
-            f"{result.project_relevance_score * weights['project_relevance']:.1f}"
+            f"Tool Match ({result.tool_match:.2f} × {self.W_TOOL:.0%}) = "
+            f"{result.tool_match * self.W_TOOL * 100:.1f}"
         )
         result.score_reasoning.append(
-            f"Education ({result.education_score:.0f} × {weights['education']:.0%}) = "
-            f"{result.education_score * weights['education']:.1f}"
+            f"Experience Relevance ({result.experience_relevance:.2f} × {self.W_EXPERIENCE:.0%}) = "
+            f"{result.experience_relevance * self.W_EXPERIENCE * 100:.1f}"
         )
+        if result.keyword_boost > 0:
+            result.score_reasoning.append(f"Keyword Boost: +{result.keyword_boost:.1f}")
         if result.certification_bonus > 0:
             result.score_reasoning.append(f"Certification Bonus: +{result.certification_bonus:.1f}")
         if result.missing_skill_penalty > 0:

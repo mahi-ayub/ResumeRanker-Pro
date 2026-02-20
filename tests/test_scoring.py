@@ -64,10 +64,6 @@ class TestScoreExplainer:
         self.explainer = ScoreExplainer()
 
     def test_summary_high_score(self):
-        # Create a mock score result
-        from dataclasses import dataclass, field
-        from typing import List, Dict
-
         class MockResult:
             overall_score = 85.0
             skill_match_score = 80.0
@@ -76,6 +72,13 @@ class TestScoreExplainer:
             education_score = 60.0
             certification_bonus = 6.0
             missing_skill_penalty = 5.0
+            semantic_similarity = 0.72
+            required_skill_match = 0.85
+            tool_match = 0.78
+            experience_relevance = 0.70
+            keyword_boost = 4.5
+            matched_required_skills = ["Python", "React", "AWS"]
+            missing_required_skills = ["Kafka"]
             matched_skills = [{"jd_skill": "Python", "resume_skill": "Python", "similarity": 0.95}]
             missing_skills = [{"skill": "Kafka", "best_match": "RabbitMQ", "best_similarity": 0.4}]
             extra_skills = ["Go"]
@@ -99,6 +102,13 @@ class TestScoreExplainer:
             education_score = 40.0
             certification_bonus = 0.0
             missing_skill_penalty = 10.0
+            semantic_similarity = 0.20
+            required_skill_match = 0.15
+            tool_match = 0.10
+            experience_relevance = 0.25
+            keyword_boost = 0.0
+            matched_required_skills = []
+            missing_required_skills = ["Python", "AWS", "Docker"]
             matched_skills = []
             missing_skills = [{"skill": "Python"}]
             extra_skills = []

@@ -384,9 +384,26 @@ def display_results(result: ScoreResult, jd_text: str, show_bias: bool, show_sug
         st.plotly_chart(create_gauge_chart(result.overall_score, "Overall Match Score"), use_container_width=True)
 
     # --- Score Breakdown Cards ---
-    st.subheader("📊 Score Breakdown")
-    col1, col2, col3, col4 = st.columns(4)
+    st.subheader("📊 ATS Score Breakdown")
 
+    # ATS component scores
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("📄 Semantic Similarity", f"{result.semantic_similarity * 100:.0f}%",
+                   help="Document-level cosine similarity (35% weight)")
+    with col2:
+        st.metric("🎯 Required Skill Match", f"{result.required_skill_match * 100:.0f}%",
+                   help="Fraction of required JD skills found (45% weight)")
+    with col3:
+        st.metric("🔧 Tool Match", f"{result.tool_match * 100:.0f}%",
+                   help="Exact technology keyword matches (10% weight)")
+    with col4:
+        st.metric("💼 Experience Relevance", f"{result.experience_relevance * 100:.0f}%",
+                   help="Experience alignment with JD (10% weight)")
+
+    # Legacy component scores
+    st.caption("Detailed Component Scores")
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("🎯 Skill Match", f"{result.skill_match_score:.0f}%")
     with col2:
@@ -396,14 +413,34 @@ def display_results(result: ScoreResult, jd_text: str, show_bias: bool, show_sug
     with col4:
         st.metric("🎓 Education", f"{result.education_score:.0f}%")
 
-    if result.certification_bonus > 0 or result.missing_skill_penalty > 0:
+    # Bonuses and penalties
+    bonus_cols = st.columns(3)
+    with bonus_cols[0]:
+        if result.keyword_boost > 0:
+            st.metric("⚡ Keyword Boost", f"+{result.keyword_boost:.1f}")
+    with bonus_cols[1]:
+        if result.certification_bonus > 0:
+            st.metric("🎖 Cert Bonus", f"+{result.certification_bonus:.1f}")
+    with bonus_cols[2]:
+        if result.missing_skill_penalty > 0:
+            st.metric("⚠️ Missing Penalty", f"-{result.missing_skill_penalty:.1f}")
+
+    # --- Required Skills Status ---
+    if result.matched_required_skills or result.missing_required_skills:
+        st.subheader("📋 Required Skills Status")
         col1, col2 = st.columns(2)
         with col1:
-            if result.certification_bonus > 0:
-                st.metric("🎖 Cert Bonus", f"+{result.certification_bonus:.1f}")
+            st.markdown("**✅ Matched Required Skills:**")
+            for s in result.matched_required_skills:
+                st.markdown(f"- ✅ {s}")
+            if not result.matched_required_skills:
+                st.caption("None matched")
         with col2:
-            if result.missing_skill_penalty > 0:
-                st.metric("⚠️ Missing Penalty", f"-{result.missing_skill_penalty:.1f}")
+            st.markdown("**❌ Missing Required Skills:**")
+            for s in result.missing_required_skills:
+                st.markdown(f"- ❌ {s}")
+            if not result.missing_required_skills:
+                st.caption("All required skills present! 🎉")
 
     # --- Radar Chart ---
     st.subheader("🕸️ Score Profile")
@@ -446,6 +483,21 @@ def display_results(result: ScoreResult, jd_text: str, show_bias: bool, show_sug
             result.jd_analysis.get("role_type", "default"),
         )
         st.markdown(weight_explanation)
+
+    # --- Structured JSON Output ---
+    with st.expander("📦 Structured ATS Output (JSON)", expanded=False):
+        import json
+        ats_json = {
+            "final_score": result.overall_score,
+            "semantic_similarity": round(result.semantic_similarity, 3),
+            "required_skill_match": round(result.required_skill_match, 3),
+            "tool_match": round(result.tool_match, 3),
+            "experience_relevance": round(result.experience_relevance, 3),
+            "matched_required_skills": result.matched_required_skills,
+            "missing_required_skills": result.missing_required_skills,
+            "boost_applied": result.keyword_boost,
+        }
+        st.json(ats_json)
 
     # --- Parsed Resume Data ---
     with st.expander("📋 Parsed Resume Sections", expanded=False):
