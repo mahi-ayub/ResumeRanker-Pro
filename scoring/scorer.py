@@ -127,10 +127,10 @@ class ResumeScorer:
     """ATS-realistic scoring pipeline: parse → analyze → match → score → explain."""
 
     # ── Stable fixed ATS weights (no dynamic shifting) ───────────────
-    W_SEMANTIC   = 0.30   # Full-document cosine similarity
-    W_REQUIRED   = 0.40   # Required-skill match ratio (highest)
+    W_SEMANTIC   = 0.28   # Full-document cosine similarity
+    W_REQUIRED   = 0.45   # Required-skill match ratio (highest)
     W_TOOL       = 0.15   # Exact tool/technology keyword match
-    W_EXPERIENCE = 0.15   # Experience alignment
+    W_EXPERIENCE = 0.12   # Experience alignment
     MAX_KEYWORD_BOOST = 5.0   # Max exact-keyword bonus
     MAX_CERT_BONUS = 4.0      # Max certification bonus
     MAX_MISSING_PENALTY = 8.0 # Max smooth missing-skill penalty
