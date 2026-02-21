@@ -122,6 +122,28 @@ SKILL_CATEGORIES = {
         "spark", "hadoop", "airflow", "kafka", "flink",
         "dbt", "snowflake", "bigquery", "redshift", "databricks",
     ],
+    "data_analysis_tools": [
+        "pandas", "numpy", "matplotlib", "seaborn", "plotly",
+        "power bi", "tableau", "looker", "excel", "google sheets",
+        "sas", "spss", "stata", "alteryx", "qlik",
+        "sql", "sql server", "scipy", "statsmodels",
+    ],
+}
+
+# Generic terms that should never count as specific skill matches.
+# These are too vague / domain-agnostic to differentiate candidates.
+GENERIC_BLOCKLIST: set = {
+    "data", "system", "systems", "cloud", "development", "analysis",
+    "experience", "design", "management", "engineering", "platform",
+    "architecture", "infrastructure", "security", "automation",
+    "testing", "deployment", "integration", "communication",
+    "leadership", "teamwork", "collaboration", "problem solving",
+    "problem-solving", "analytical", "research", "reporting",
+    "documentation", "support", "operations", "services", "solutions",
+    "technology", "tools", "software", "hardware", "network",
+    "networking", "database", "web", "mobile", "frontend", "backend",
+    "full-stack", "fullstack", "devops", "machine learning",
+    "artificial intelligence", "deep learning", "natural language processing",
 }
 
 # Seniority level definitions

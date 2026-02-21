@@ -13,7 +13,7 @@ import re
 from typing import List, Dict, Optional, Tuple
 from loguru import logger
 
-from utils.config import SKILL_CATEGORIES, ROLE_WEIGHT_PROFILES
+from utils.config import SKILL_CATEGORIES, ROLE_WEIGHT_PROFILES, GENERIC_BLOCKLIST
 
 
 # Role type classification keywords
@@ -169,7 +169,11 @@ class JDAnalyzer:
             if skill not in [s.lower() for s in required] and skill not in [s.lower() for s in preferred]:
                 required.append(match.group())
 
-        return list(set(required)), list(set(preferred))
+        # Filter out generic / vague terms that inflate scores for unrelated resumes
+        required = [s for s in set(required) if s.lower().strip() not in GENERIC_BLOCKLIST]
+        preferred = [s for s in set(preferred) if s.lower().strip() not in GENERIC_BLOCKLIST]
+
+        return required, preferred
 
     def _split_jd_sections(self, jd_text: str) -> Dict[str, str]:
         """Split JD into named sections."""

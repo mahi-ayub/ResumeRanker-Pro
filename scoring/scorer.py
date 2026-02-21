@@ -30,6 +30,7 @@ from nlp.experience_analyzer import ExperienceAnalyzer
 from nlp.jd_analyzer import JDAnalyzer
 from scoring.weights import DynamicWeightCalculator
 from utils.helpers import clamp, clean_text, deduplicate_list
+from utils.config import GENERIC_BLOCKLIST
 
 
 # ── Critical keywords eligible for exact-match boost ────────────────
@@ -44,6 +45,10 @@ CRITICAL_KEYWORDS = {
     # Data & ML
     "pytorch", "tensorflow", "scikit-learn", "spark", "kafka", "airflow",
     "sql", "postgresql", "mysql", "mongodb", "redis", "elasticsearch",
+    # Data analysis tools
+    "power bi", "tableau", "pandas", "numpy", "excel", "matplotlib",
+    "seaborn", "looker", "dbt", "snowflake", "bigquery", "redshift",
+    "sas", "spss", "stata", "alteryx",
     # Domain-specific
     "incident management", "sla", "on-call", "monitoring",
     "microservices", "rest api", "graphql", "agile", "scrum",
@@ -293,16 +298,27 @@ class ResumeScorer:
 
         # ── 14. ATS-weighted aggregation ───────────────────────────
         #
-        #   final = 0.35 * semantic_sim
-        #         + 0.45 * required_skill_match
-        #         + 0.10 * tool_match
-        #         + 0.10 * experience_relevance
-        #         + keyword_boost + cert_bonus - missing_penalty
+        # Dynamic weight adjustment:
+        #   If required_skill_match < 0.60, the resume lacks the core
+        #   tools the JD asks for.  Reduce semantic weight from 35% → 25%
+        #   and redistribute the freed 10% to required_skill (now 55%).
+        #   This prevents a domain-adjacent resume from scoring 70+ purely
+        #   on semantic similarity.
         #
+        w_sem = self.W_SEMANTIC
+        w_req = self.W_REQUIRED
+        if result.required_skill_match < 0.60:
+            w_sem = 0.25          # reduced from 0.35
+            w_req = 0.55          # increased from 0.45
+
+        # Store effective weights for display
+        result.weights_used["ats_semantic_effective"] = w_sem
+        result.weights_used["ats_required_effective"] = w_req
+
         # All component scores are 0-1, multiplied by 100
         base_score = (
-            self.W_SEMANTIC   * result.semantic_similarity
-            + self.W_REQUIRED * result.required_skill_match
+            w_sem             * result.semantic_similarity
+            + w_req           * result.required_skill_match
             + self.W_TOOL     * result.tool_match
             + self.W_EXPERIENCE * result.experience_relevance
         ) * 100.0
@@ -328,7 +344,7 @@ class ResumeScorer:
         return result
 
     # ────────────────────────────────────────────────────────────────
-    #  Required-skill match ratio
+    #  Required-skill match ratio  (STRICT — tools only, no generics)
     # ────────────────────────────────────────────────────────────────
     def _compute_required_skill_match(
         self,
@@ -338,7 +354,17 @@ class ResumeScorer:
     ) -> tuple:
         """
         Compute fraction of required JD skills present in resume.
-        Uses exact case-insensitive match first, then semantic fallback.
+
+        RULES:
+        - Generic / vague words (data, system, cloud, development …) are
+          stripped from the required list BEFORE matching so they cannot
+          inflate the ratio.
+        - Only exact case-insensitive keyword matches count.  Semantic
+          fallback is allowed only at very high similarity (≥ 0.80) to
+          prevent domain-adjacent terms from leaking in.
+        - If > 40 % of the *technical* required tools are still missing
+          after matching, the ratio is hard-capped at 0.55.
+
         Returns (ratio, matched_list, missing_list).
         """
         if not required_skills:
@@ -350,35 +376,75 @@ class ResumeScorer:
             missing = [m.get("skill", "") for m in skill_result.get("missing_skills", [])]
             return ratio, matched, missing
 
-        resume_lower = {s.lower().strip() for s in resume_skills}
-        matched = []
-        missing = []
+        # ── 1. Filter out generic words from required skills ───────
+        technical_required = [
+            s for s in required_skills
+            if s.lower().strip() not in GENERIC_BLOCKLIST
+        ]
+        # Keep the generics for reporting but never let them boost ratio
+        generic_dropped = [
+            s for s in required_skills
+            if s.lower().strip() in GENERIC_BLOCKLIST
+        ]
+        if generic_dropped:
+            logger.debug(
+                f"Filtered {len(generic_dropped)} generic terms from required skills: "
+                f"{generic_dropped}"
+            )
 
-        for req in required_skills:
+        # If every "required skill" was generic, fall back to the full
+        # semantic skill_result so we still return something meaningful.
+        if not technical_required:
+            n_matched = len(skill_result.get("matched_skills", []))
+            n_total = n_matched + len(skill_result.get("missing_skills", []))
+            ratio = n_matched / max(n_total, 1)
+            matched = [m.get("jd_skill", "") for m in skill_result.get("matched_skills", [])]
+            missing = [m.get("skill", "") for m in skill_result.get("missing_skills", [])]
+            return ratio, matched, missing
+
+        # ── 2. Strict matching against technical required skills ───
+        resume_lower = {s.lower().strip() for s in resume_skills}
+        matched: List[str] = []
+        missing: List[str] = []
+
+        for req in technical_required:
             req_clean = req.lower().strip()
-            # Exact match
+
+            # a) Exact case-insensitive match
             if req_clean in resume_lower:
                 matched.append(req)
                 continue
-            # Check if any resume skill contains this required skill (substring)
+
+            # b) Substring: resume skill contains the required keyword
             if any(req_clean in rs for rs in resume_lower):
                 matched.append(req)
                 continue
-            # Semantic fallback from the already-computed skill_result
+
+            # c) Very-high-confidence semantic fallback only (≥ 0.80)
+            #    This prevents "Power BI" from matching "data analysis".
             found_semantic = False
             for m in skill_result.get("matched_skills", []):
-                if m.get("jd_skill", "").lower().strip() == req_clean and m.get("similarity", 0) >= 0.45:
+                if (m.get("jd_skill", "").lower().strip() == req_clean
+                        and m.get("similarity", 0) >= 0.80):
                     matched.append(req)
                     found_semantic = True
                     break
+
             if not found_semantic:
                 missing.append(req)
 
-        ratio = len(matched) / max(len(required_skills), 1)
+        n_tech = len(technical_required)
+        n_missing = len(missing)
+        ratio = len(matched) / max(n_tech, 1)
+
+        # ── 3. Hard cap: if >40% technical tools are missing ───────
+        if n_tech > 0 and (n_missing / n_tech) > 0.40:
+            ratio = min(ratio, 0.55)
+
         return ratio, matched, missing
 
     # ────────────────────────────────────────────────────────────────
-    #  Tool / technology exact match
+    #  Tool / technology exact match  (strict — no generics)
     # ────────────────────────────────────────────────────────────────
     def _compute_tool_match(
         self,
@@ -388,21 +454,30 @@ class ResumeScorer:
     ) -> float:
         """
         Compute what fraction of JD tools/technologies appear exactly
-        in the resume (case-insensitive). Normalized 0-1.
+        in the resume (case-insensitive).  Generic terms are excluded.
+        Normalized 0-1.
         """
         if not jd_skills:
+            return 0.0
+
+        # Only score concrete tools, not generic words
+        tech_jd = [
+            s for s in jd_skills
+            if s.lower().strip() not in GENERIC_BLOCKLIST
+        ]
+        if not tech_jd:
             return 0.0
 
         resume_lower = resume_text.lower()
         resume_skill_set = {s.lower().strip() for s in resume_skills}
         matched = 0
 
-        for skill in jd_skills:
+        for skill in tech_jd:
             s = skill.lower().strip()
             if s in resume_skill_set or s in resume_lower:
                 matched += 1
 
-        return matched / len(jd_skills)
+        return matched / len(tech_jd)
 
     # ────────────────────────────────────────────────────────────────
     #  Exact keyword boost (controlled, max +8)
@@ -485,14 +560,21 @@ class ResumeScorer:
         if exp_quality.get("quantified_ratio", 0) < 0.15:
             result.weaknesses.append("Few quantified achievements in experience bullets")
 
-        # Score reasoning (ATS breakdown)
+        # Score reasoning (ATS breakdown) — use effective weights
+        w_sem_eff = result.weights_used.get("ats_semantic_effective", self.W_SEMANTIC)
+        w_req_eff = result.weights_used.get("ats_required_effective", self.W_REQUIRED)
+
+        if w_sem_eff != self.W_SEMANTIC:
+            result.score_reasoning.append(
+                "⚠️ Semantic weight reduced (25%) — required-skill coverage < 60%"
+            )
         result.score_reasoning.append(
-            f"Semantic Similarity ({result.semantic_similarity:.2f} × {self.W_SEMANTIC:.0%}) = "
-            f"{result.semantic_similarity * self.W_SEMANTIC * 100:.1f}"
+            f"Semantic Similarity ({result.semantic_similarity:.2f} × {w_sem_eff:.0%}) = "
+            f"{result.semantic_similarity * w_sem_eff * 100:.1f}"
         )
         result.score_reasoning.append(
-            f"Required Skill Match ({result.required_skill_match:.2f} × {self.W_REQUIRED:.0%}) = "
-            f"{result.required_skill_match * self.W_REQUIRED * 100:.1f}"
+            f"Required Skill Match ({result.required_skill_match:.2f} × {w_req_eff:.0%}) = "
+            f"{result.required_skill_match * w_req_eff * 100:.1f}"
         )
         result.score_reasoning.append(
             f"Tool Match ({result.tool_match:.2f} × {self.W_TOOL:.0%}) = "
