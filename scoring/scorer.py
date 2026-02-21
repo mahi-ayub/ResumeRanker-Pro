@@ -11,10 +11,10 @@ Orchestrates:
 8. Structured JSON output with calibrated scoring
 
 Calibration targets:
-  Strong match  = 80–90
-  Moderate      = 65–79
-  Partial       = 50–64
-  Weak          < 50
+  Strong aligned    = 82–88
+  Moderate match    = 55–70
+  Weak but related  = 40–55
+  Completely unrelated = 35–45
 """
 
 from typing import Dict, List, Optional
@@ -126,13 +126,16 @@ class ScoreResult:
 class ResumeScorer:
     """ATS-realistic scoring pipeline: parse → analyze → match → score → explain."""
 
-    # ── ATS weight distribution (skills dominate) ───────────────────
-    W_SEMANTIC   = 0.35   # Full-document cosine similarity
-    W_REQUIRED   = 0.45   # Required-skill match ratio (highest)
-    W_TOOL       = 0.10   # Exact tool/technology keyword match
-    W_EXPERIENCE = 0.10   # Experience alignment
-    MAX_KEYWORD_BOOST = 8.0   # Max exact-keyword bonus
-    SCORE_CAP = 95.0          # Hard ceiling (avoid unrealistic 100)
+    # ── Stable fixed ATS weights (no dynamic shifting) ───────────────
+    W_SEMANTIC   = 0.30   # Full-document cosine similarity
+    W_REQUIRED   = 0.40   # Required-skill match ratio (highest)
+    W_TOOL       = 0.15   # Exact tool/technology keyword match
+    W_EXPERIENCE = 0.15   # Experience alignment
+    MAX_KEYWORD_BOOST = 5.0   # Max exact-keyword bonus
+    MAX_CERT_BONUS = 4.0      # Max certification bonus
+    MAX_MISSING_PENALTY = 8.0 # Max smooth missing-skill penalty
+    SCORE_FLOOR = 35.0        # Compression lower bound
+    SCORE_CEIL  = 88.0        # Compression upper bound
 
     def __init__(self):
         self.pdf_parser = PDFParser()
@@ -199,6 +202,9 @@ class ResumeScorer:
             "ats_required_skill": self.W_REQUIRED,
             "ats_tool": self.W_TOOL,
             "ats_experience": self.W_EXPERIENCE,
+            "max_keyword_boost": self.MAX_KEYWORD_BOOST,
+            "max_cert_bonus": self.MAX_CERT_BONUS,
+            "max_missing_penalty": self.MAX_MISSING_PENALTY,
         }
 
         # ── 4. Semantic skill matching (full list) ─────────────────
@@ -272,14 +278,11 @@ class ResumeScorer:
         )
         result.education_score = round(edu_score * 100, 1)
 
-        # ── 11. Certification bonus ────────────────────────────────
-        cert_bonus = min(
-            len(resume_data.certifications) * weights["certification_bonus"] * 100,
-            8.0,
-        )
+        # ── 11. Certification bonus (smooth, max +4) ──────────────
+        cert_bonus = min(len(resume_data.certifications) * 1.0, self.MAX_CERT_BONUS)
         result.certification_bonus = round(cert_bonus, 1)
 
-        # ── 12. Exact keyword boost (controlled, max +8) ──────────
+        # ── 12. Exact keyword boost (smooth, max +5) ──────────────
         keyword_boost = self._compute_keyword_boost(
             resume_text=resume_text,
             resume_skills=resume_data.skills,
@@ -287,49 +290,29 @@ class ResumeScorer:
         )
         result.keyword_boost = round(keyword_boost, 1)
 
-        # ── 13. Missing-skill penalty (only for required) ─────────
+        # ── 13. Smooth missing-skill penalty (max 8 pts) ──────────
         n_missing_req = len(missing_req)
         n_total_req = max(len(required_skills), 1)
-        missing_penalty = min(
-            (n_missing_req / n_total_req) * 15.0,  # Proportional, max 15 pts
-            15.0,
-        )
+        missing_ratio = n_missing_req / n_total_req
+        missing_penalty = missing_ratio * self.MAX_MISSING_PENALTY
         result.missing_skill_penalty = round(missing_penalty, 1)
 
-        # ── 14. ATS-weighted aggregation ───────────────────────────
+        # ── 14. Stable weighted aggregation ────────────────────────
         #
-        # Dynamic weight adjustment:
-        #   If required_skill_match < 0.60, the resume lacks the core
-        #   tools the JD asks for.  Reduce semantic weight from 35% → 25%
-        #   and redistribute the freed 10% to required_skill (now 55%).
-        #   This prevents a domain-adjacent resume from scoring 70+ purely
-        #   on semantic similarity.
+        # All component scores are already 0-1 normalized.
+        # Fixed weights, no dynamic shifting, no coverage boost.
         #
-        w_sem = self.W_SEMANTIC
-        w_req = self.W_REQUIRED
-        if result.required_skill_match < 0.60:
-            w_sem = 0.25          # reduced from 0.35
-            w_req = 0.55          # increased from 0.45
-
-        # Store effective weights for display
-        result.weights_used["ats_semantic_effective"] = w_sem
-        result.weights_used["ats_required_effective"] = w_req
-
-        # All component scores are 0-1, multiplied by 100
         base_score = (
-            w_sem             * result.semantic_similarity
-            + w_req           * result.required_skill_match
+            self.W_SEMANTIC   * result.semantic_similarity
+            + self.W_REQUIRED * result.required_skill_match
             + self.W_TOOL     * result.tool_match
             + self.W_EXPERIENCE * result.experience_relevance
         ) * 100.0
 
-        # Required-skill coverage boost: if ≥70% required skills present, boost
-        if req_match_ratio >= 0.70:
-            coverage_boost = (req_match_ratio - 0.70) / 0.30 * 5.0  # up to +5
-            base_score += coverage_boost
-
-        overall = base_score + keyword_boost + cert_bonus - missing_penalty
-        result.overall_score = round(clamp(overall, 0, self.SCORE_CAP), 1)
+        final = base_score + keyword_boost + cert_bonus - missing_penalty
+        result.overall_score = round(
+            clamp(final, self.SCORE_FLOOR, self.SCORE_CEIL), 1
+        )
 
         # ── 15. Generate explanations ──────────────────────────────
         self._generate_explanations(result, weights, jd_analysis)
@@ -362,8 +345,6 @@ class ResumeScorer:
         - Only exact case-insensitive keyword matches count.  Semantic
           fallback is allowed only at very high similarity (≥ 0.80) to
           prevent domain-adjacent terms from leaking in.
-        - If > 40 % of the *technical* required tools are still missing
-          after matching, the ratio is hard-capped at 0.55.
 
         Returns (ratio, matched_list, missing_list).
         """
@@ -434,12 +415,7 @@ class ResumeScorer:
                 missing.append(req)
 
         n_tech = len(technical_required)
-        n_missing = len(missing)
         ratio = len(matched) / max(n_tech, 1)
-
-        # ── 3. Hard cap: if >40% technical tools are missing ───────
-        if n_tech > 0 and (n_missing / n_tech) > 0.40:
-            ratio = min(ratio, 0.55)
 
         return ratio, matched, missing
 
@@ -489,10 +465,10 @@ class ResumeScorer:
         jd_skills: List[str],
     ) -> float:
         """
-        Award a controlled bonus when critical JD keywords appear
-        exactly in the resume. Only counts keywords that are BOTH
-        in the JD and in the critical-keyword set.
-        Max +8 points.
+        Award a smooth bonus when critical JD keywords appear exactly
+        in the resume. Only counts keywords that are BOTH in the JD
+        and in the critical-keyword set.
+        Each hit = +1.0 pt, max +5.0.
         """
         resume_lower = resume_text.lower()
         resume_skill_lower = {s.lower().strip() for s in resume_skills}
@@ -508,9 +484,7 @@ class ResumeScorer:
             if kw in resume_skill_lower or kw in resume_lower:
                 hits += 1
 
-        # Scale: each hit is worth 1.5 pts, capped at MAX_KEYWORD_BOOST
-        boost = min(hits * 1.5, self.MAX_KEYWORD_BOOST)
-        return boost
+        return min(hits * 1.0, self.MAX_KEYWORD_BOOST)
 
     # ────────────────────────────────────────────────────────────────
     #  Explanations
@@ -560,21 +534,14 @@ class ResumeScorer:
         if exp_quality.get("quantified_ratio", 0) < 0.15:
             result.weaknesses.append("Few quantified achievements in experience bullets")
 
-        # Score reasoning (ATS breakdown) — use effective weights
-        w_sem_eff = result.weights_used.get("ats_semantic_effective", self.W_SEMANTIC)
-        w_req_eff = result.weights_used.get("ats_required_effective", self.W_REQUIRED)
-
-        if w_sem_eff != self.W_SEMANTIC:
-            result.score_reasoning.append(
-                "⚠️ Semantic weight reduced (25%) — required-skill coverage < 60%"
-            )
+        # Score reasoning (ATS breakdown) — fixed weights, no dynamic shifting
         result.score_reasoning.append(
-            f"Semantic Similarity ({result.semantic_similarity:.2f} × {w_sem_eff:.0%}) = "
-            f"{result.semantic_similarity * w_sem_eff * 100:.1f}"
+            f"Semantic Similarity ({result.semantic_similarity:.2f} × {self.W_SEMANTIC:.0%}) = "
+            f"{result.semantic_similarity * self.W_SEMANTIC * 100:.1f}"
         )
         result.score_reasoning.append(
-            f"Required Skill Match ({result.required_skill_match:.2f} × {w_req_eff:.0%}) = "
-            f"{result.required_skill_match * w_req_eff * 100:.1f}"
+            f"Required Skill Match ({result.required_skill_match:.2f} × {self.W_REQUIRED:.0%}) = "
+            f"{result.required_skill_match * self.W_REQUIRED * 100:.1f}"
         )
         result.score_reasoning.append(
             f"Tool Match ({result.tool_match:.2f} × {self.W_TOOL:.0%}) = "
