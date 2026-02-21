@@ -191,7 +191,6 @@ class ResumeScorer:
         result.jd_analysis = jd_analysis
 
         required_skills = jd_analysis.get("required_skills", [])
-        preferred_skills = jd_analysis.get("preferred_skills", [])
         all_jd_skills = jd_analysis.get("all_skills", [])
 
         # ── 3. Dynamic weights (for legacy display) ────────────────
@@ -456,7 +455,7 @@ class ResumeScorer:
         return matched / len(tech_jd)
 
     # ────────────────────────────────────────────────────────────────
-    #  Exact keyword boost (controlled, max +8)
+    #  Exact keyword boost (controlled, max +5)
     # ────────────────────────────────────────────────────────────────
     def _compute_keyword_boost(
         self,

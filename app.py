@@ -9,6 +9,7 @@ Run: streamlit run app.py
 
 import sys
 import os
+import json
 import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
@@ -390,16 +391,16 @@ def display_results(result: ScoreResult, jd_text: str, show_bias: bool, show_sug
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("📄 Semantic Similarity", f"{result.semantic_similarity * 100:.0f}%",
-                   help="Document-level cosine similarity (35% weight)")
+                   help="Document-level cosine similarity (28% weight)")
     with col2:
         st.metric("🎯 Required Skill Match", f"{result.required_skill_match * 100:.0f}%",
                    help="Fraction of required JD skills found (45% weight)")
     with col3:
         st.metric("🔧 Tool Match", f"{result.tool_match * 100:.0f}%",
-                   help="Exact technology keyword matches (10% weight)")
+                   help="Exact technology keyword matches (15% weight)")
     with col4:
         st.metric("💼 Experience Relevance", f"{result.experience_relevance * 100:.0f}%",
-                   help="Experience alignment with JD (10% weight)")
+                   help="Experience alignment with JD (12% weight)")
 
     # Legacy component scores
     st.caption("Detailed Component Scores")
@@ -486,7 +487,6 @@ def display_results(result: ScoreResult, jd_text: str, show_bias: bool, show_sug
 
     # --- Structured JSON Output ---
     with st.expander("📦 Structured ATS Output (JSON)", expanded=False):
-        import json
         ats_json = {
             "final_score": result.overall_score,
             "semantic_similarity": round(result.semantic_similarity, 3),

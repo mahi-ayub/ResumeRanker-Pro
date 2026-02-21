@@ -3,7 +3,7 @@
 Uses cosine similarity on transformer embeddings at skill, section, and document levels.
 """
 
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Optional
 import numpy as np
 from loguru import logger
 

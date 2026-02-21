@@ -136,21 +136,20 @@ class JDAnalyzer:
                 required.append(skill)  # Default to required
 
         # For short skills (r, go, c#, etc.), use word-boundary regex to avoid false positives
-        import re as _re
         for skill in short_skills:
             # Special handling: "r" alone is very ambiguous — only match "R programming" or "R language" or standalone "R," patterns
             if skill == "r":
                 r_pattern = r'\bR\b(?:\s+(?:programming|language|studio)|\s*[,;|/])'
-                if _re.search(r_pattern, jd_text):
+                if re.search(r_pattern, jd_text):
                     required.append(skill)
                 continue
 
-            pattern = r'\b' + _re.escape(skill) + r'\b'
-            if _re.search(pattern, required_text, _re.IGNORECASE):
+            pattern = r'\b' + re.escape(skill) + r'\b'
+            if re.search(pattern, required_text, re.IGNORECASE):
                 required.append(skill)
-            elif _re.search(pattern, preferred_text, _re.IGNORECASE):
+            elif re.search(pattern, preferred_text, re.IGNORECASE):
                 preferred.append(skill)
-            elif _re.search(pattern, jd_text, _re.IGNORECASE):
+            elif re.search(pattern, jd_text, re.IGNORECASE):
                 required.append(skill)
 
         # Also extract technology names via patterns
